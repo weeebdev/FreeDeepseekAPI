@@ -73,8 +73,10 @@ test('3 /v1/responses plain', async () => {
 test('4 OpenAI tool calling parse', async () => {
   const r = await post('/v1/chat/completions', { model: MODEL, user: `smoke-tool-oai-${Date.now()}`, messages: [{ role: 'user', content: 'What time is it in UTC? Use the available tool. Output only the tool request.' }], tools, tool_choice: 'auto', stream: false }, 180000);
   assert(r.ok, `HTTP ${r.status}: ${r.text}`);
-  const tc = r.json?.choices?.[0]?.message?.tool_calls?.[0];
+  const msg = r.json?.choices?.[0]?.message || {};
+  const tc = msg.tool_calls?.[0];
   assert(tc?.function?.name === 'get_current_time', `no/incorrect tool_call: ${r.text}`);
+  assert(!msg.reasoning_content, `tool_call message leaked reasoning_content: ${r.text}`);
   return `${tc.function.name} ${tc.function.arguments}`;
 });
 
@@ -83,6 +85,7 @@ test('5 Anthropic tool calling parse', async () => {
   assert(r.ok, `HTTP ${r.status}: ${r.text}`);
   const block = (r.json?.content || []).find(b => b.type === 'tool_use');
   assert(block?.name === 'get_current_time', `no/incorrect tool_use: ${r.text}`);
+  assert(!r.json?.reasoning_content, `Anthropic tool_use response leaked reasoning_content: ${r.text}`);
   return `${block.name} ${JSON.stringify(block.input)}`;
 });
 
@@ -91,6 +94,7 @@ test('6 Responses tool calling parse', async () => {
   assert(r.ok, `HTTP ${r.status}: ${r.text}`);
   const item = (r.json?.output || []).find(o => o.type === 'function_call');
   assert(item?.name === 'get_current_time', `no/incorrect function_call: ${r.text}`);
+  assert(!(r.json?.output || []).some(o => o.type === 'reasoning'), `Responses function_call output leaked reasoning item: ${r.text}`);
   return `${item.name} ${item.arguments}`;
 });
 
@@ -99,7 +103,8 @@ test('7 Anthropic streaming tool calling stays tool-only', async () => {
   assert(r.ok, `HTTP ${r.status}: ${r.text}`);
   assert(/"type":"tool_use"/.test(r.text), `stream has no tool_use block: ${summarizeText(r.text)}`);
   assert(!/"type":"text_delta"/.test(r.text), `tool stream included text deltas before/during tool_use: ${summarizeText(r.text)}`);
-  return 'tool_use block without text deltas';
+  assert(!/reasoning_content|\[reasoning\]|reasoning_summary/.test(r.text), `tool stream leaked reasoning payload: ${summarizeText(r.text)}`);
+  return 'tool_use block without reasoning/text deltas';
 });
 
 let failed = 0;

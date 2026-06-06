@@ -532,7 +532,8 @@ function buildToolCallResponse(toolCall, model = 'deepseek-default', prompt = ''
             function: { name: toolCall.name, arguments: toolCall.arguments }
         }]
     };
-    if (reasoningContent) message.reasoning_content = reasoningContent;
+    // Do not attach reasoning to tool-call turns. Some agent clients treat any
+    // reasoning/text payload as a final assistant answer and stop their tool loop.
     return {
         id: 'ds-' + Date.now(),
         object: 'chat.completion',
@@ -679,15 +680,16 @@ function safeJsonParseObject(text, fallback = {}) {
 function toAnthropicResponse(openaiResp) {
     const choice = openaiResp.choices[0];
     const msg = choice.message || {};
+    const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     const content = [];
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
+    if (hasToolCalls) {
         for (const tc of msg.tool_calls) {
             content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input: safeJsonParseObject(tc.function.arguments) });
         }
     } else {
         content.push({ type: 'text', text: msg.content || '' });
     }
-    return {
+    const response = {
         id: 'msg_' + openaiResp.id,
         type: 'message',
         role: 'assistant',
@@ -699,9 +701,10 @@ function toAnthropicResponse(openaiResp) {
             input_tokens: openaiResp.usage?.prompt_tokens || 0,
             output_tokens: openaiResp.usage?.completion_tokens || 0,
         },
-        reasoning_content: msg.reasoning_content || undefined,
         watermark: FORGETMEAI_WATERMARK,
     };
+    if (!hasToolCalls && msg.reasoning_content) response.reasoning_content = msg.reasoning_content;
+    return response;
 }
 
 function writeSse(res, event, data) {
@@ -750,11 +753,12 @@ function sendAnthropicStream(res, openaiResp) {
 function toResponsesResponse(openaiResp) {
     const choice = openaiResp.choices[0];
     const msg = choice.message || {};
+    const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     const output = [];
-    if (msg.reasoning_content) {
+    if (!hasToolCalls && msg.reasoning_content) {
         output.push({ id: 'rs_' + Date.now(), type: 'reasoning', summary: [{ type: 'summary_text', text: msg.reasoning_content }] });
     }
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
+    if (hasToolCalls) {
         for (const tc of msg.tool_calls) {
             output.push({ type: 'function_call', id: 'fc_' + tc.id, call_id: tc.id, name: tc.function.name, arguments: tc.function.arguments || '{}' });
         }
@@ -784,17 +788,18 @@ function sendResponsesStream(res, openaiResp) {
     const response = toResponsesResponse(openaiResp);
     const choice = openaiResp.choices[0];
     const msg = choice.message || {};
+    const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     writeSse(res, 'response.created', { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } });
     writeSse(res, 'response.in_progress', { type: 'response.in_progress', response: { ...response, status: 'in_progress', output: [] } });
     let outputIndex = 0;
-    if (msg.reasoning_content) {
+    if (!hasToolCalls && msg.reasoning_content) {
         const reasoningItem = { id: 'rs_' + Date.now(), type: 'reasoning', summary: [], status: 'completed' };
         writeSse(res, 'response.output_item.added', { type: 'response.output_item.added', output_index: outputIndex, item: { ...reasoningItem, status: 'in_progress' } });
         writeSse(res, 'response.reasoning_summary_text.delta', { type: 'response.reasoning_summary_text.delta', output_index: outputIndex, summary_index: 0, delta: msg.reasoning_content });
         writeSse(res, 'response.output_item.done', { type: 'response.output_item.done', output_index: outputIndex, item: { ...reasoningItem, summary: [{ type: 'summary_text', text: msg.reasoning_content }] } });
         outputIndex++;
     }
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
+    if (hasToolCalls) {
         msg.tool_calls.forEach((tc) => {
             const item = { type: 'function_call', id: 'fc_' + tc.id, call_id: tc.id, name: tc.function.name, arguments: tc.function.arguments || '{}', status: 'completed' };
             writeSse(res, 'response.output_item.added', { type: 'response.output_item.added', output_index: outputIndex, item: { ...item, arguments: '', status: 'in_progress' } });
@@ -827,13 +832,14 @@ function sendOpenAIStream(res, openaiResp) {
     const id = openaiResp.id;
     const created = openaiResp.created;
     const model = openaiResp.model;
-    if (msg.reasoning_content) {
+    const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
+    if (!hasToolCalls && msg.reasoning_content) {
         for (let i = 0; i < msg.reasoning_content.length; i += 50) {
             const chunk = msg.reasoning_content.substring(i, i + 50);
             res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { reasoning_content: chunk }, finish_reason: null }] })}\n\n`);
         }
     }
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
+    if (hasToolCalls) {
         res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { role: 'assistant', content: null, tool_calls: msg.tool_calls }, finish_reason: null }] })}\n\n`);
         res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`);
     } else {
