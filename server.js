@@ -80,22 +80,42 @@ function buildBaseHeaders() {
         "Content-Type": "application/json",
     };
 }
+function applyAuthEnvOverrides() {
+    if (process.env.DEEPSEEK_TOKEN) DS_CONFIG.token = process.env.DEEPSEEK_TOKEN;
+    if (process.env.DEEPSEEK_HIF_DLIQ) DS_CONFIG.hif_dliq = process.env.DEEPSEEK_HIF_DLIQ;
+    if (process.env.DEEPSEEK_HIF_LEIM) DS_CONFIG.hif_leim = process.env.DEEPSEEK_HIF_LEIM;
+    if (process.env.DEEPSEEK_COOKIE) DS_CONFIG.cookie = process.env.DEEPSEEK_COOKIE;
+    if (process.env.DEEPSEEK_WASM_URL) DS_CONFIG.wasmUrl = process.env.DEEPSEEK_WASM_URL;
+}
 function loadDeepSeekConfig({ fatal = true } = {}) {
+    DS_CONFIG = {};
+    let source = 'environment variables';
+
     try {
-        const raw = fs.readFileSync(DS_CONFIG_PATH, 'utf8');
-        DS_CONFIG = JSON.parse(raw);
-        BASE_HEADERS = buildBaseHeaders();
-        console.log(`[DS-API] Loaded auth config from ${DS_CONFIG_PATH}`);
-        return true;
+        if (fs.existsSync(DS_CONFIG_PATH)) {
+            DS_CONFIG = JSON.parse(fs.readFileSync(DS_CONFIG_PATH, 'utf8'));
+            source = DS_CONFIG_PATH;
+        }
     } catch (e) {
-        DS_CONFIG = {};
-        BASE_HEADERS = buildBaseHeaders();
         if (fatal) {
-            console.error(`[DS-API] FATAL: Could not load auth config: ${e.message}`);
+            console.error(`[DS-API] FATAL: Could not load auth config file: ${e.message}`);
             process.exit(1);
         }
-        return false;
     }
+
+    applyAuthEnvOverrides();
+    BASE_HEADERS = buildBaseHeaders();
+
+    if (hasAuthConfig()) {
+        console.log(`[DS-API] Loaded auth config from ${source}`);
+        return true;
+    }
+
+    if (fatal) {
+        console.error('[DS-API] FATAL: Missing DeepSeek auth (deepseek-auth.json or DEEPSEEK_TOKEN + DEEPSEEK_COOKIE env vars)');
+        process.exit(1);
+    }
+    return false;
 }
 function hasAuthConfig() { return !!(DS_CONFIG.token && DS_CONFIG.cookie); }
 loadDeepSeekConfig({ fatal: false });

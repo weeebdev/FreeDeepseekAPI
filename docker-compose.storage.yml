@@ -1,0 +1,6 @@
+# Optional: mount a local auth file instead of using env vars.
+#   docker compose -f docker-compose.yml -f docker-compose.storage.yml up -d
+services:
+  free-deepseek-api:
+    volumes:
+      - ./config:/config:ro
