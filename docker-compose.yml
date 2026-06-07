@@ -1,0 +1,29 @@
+services:
+  free-deepseek-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_NAME:-free-deepseek-api}:${IMAGE_TAG:-local}
+    container_name: ${CONTAINER_NAME:-free-deepseek-api}
+    restart: ${RESTART_POLICY:-unless-stopped}
+    # ports:
+    #   - "${HOST_PORT:-9655}:${PORT:-9655}"
+    environment:
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-9655}
+      NON_INTERACTIVE: ${NON_INTERACTIVE:-1}
+      DEEPSEEK_AUTH_PATH: ${DEEPSEEK_AUTH_PATH:-/config/deepseek-auth.json}
+    volumes:
+      - ${DEEPSEEK_AUTH_FILE:-./deepseek-auth.json}:${DEEPSEEK_AUTH_PATH:-/config/deepseek-auth.json}:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:'+(process.env.PORT||9655)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

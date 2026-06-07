@@ -1,0 +1,16 @@
+node_modules
+.git
+.gitignore
+.env
+*.log
+deepseek-auth.json
+auth.json
+.chrome-profile-deepseek
+.chrome-for-testing-profile-deepseek
+.chrome-for-testing-profile-deepseek.stale-*
+*.session.json
+.DS_Store
+*.pdf
+README.md
+docs
+chrome-extension
