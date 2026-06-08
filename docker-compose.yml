@@ -14,3 +14,10 @@ services:
       DEEPSEEK_HIF_LEIM: ${DEEPSEEK_HIF_LEIM:-}
       DEEPSEEK_COOKIE: ${DEEPSEEK_COOKIE:-}
       DEEPSEEK_WASM_URL: ${DEEPSEEK_WASM_URL:-}
+    networks:
+      - ai-mesh
+
+networks:
+  ai-mesh:
+    name: ai_mesh
+    external: true
